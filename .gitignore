@@ -1,0 +1,9 @@
+.mypy_cache/
+.python-version
+.ipynb_checkpoints
+.idea
+notebooks/
+datasets/
+apps/
+**/__pycache__/
+*.egg-info/

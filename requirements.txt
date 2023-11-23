@@ -1,0 +1,4 @@
+duckdb
+openai
+pandas
+sqlparse
