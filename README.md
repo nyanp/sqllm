@@ -1,4 +1,4 @@
-# sqllm - SQL with LLM functions
+# sqllm - Bringing the Power of LLM to SQL
 With this library, you can use LLM to perform queries on your data.
 The only LLM function you need to learn is the "AI" function.
 
@@ -100,5 +100,10 @@ sqllm.query(
 )
 ```
 
+## Installation
+```
+pip install sqllm
+```
+
 ## Important notes
-This library is not recommended for execution on large data.
+It is not recommended to run this library on large tables from the cost and processing time point of view.
