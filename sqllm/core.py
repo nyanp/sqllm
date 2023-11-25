@@ -1,58 +1,73 @@
-import random
-import string
-from contextlib import contextmanager
+import os
+import tempfile
 from typing import Any, Callable
 
 import duckdb
 import pandas as pd
 
-from sqllm._extract_table_names import extract_tables
 from sqllm.functions import ai
 
 
-def randomname(n: int) -> str:
-    return "".join([random.choice(string.ascii_letters) for i in range(n)])
-
-
-@contextmanager
-def temp_schema(conn: Any):
-    name = randomname(8)
-    conn.sql(f"CREATE SCHEMA {name}")
-    try:
-        yield name
-    finally:
-        conn.sql(f"DROP SCHEMA {name} CASCADE")
-
-
 def query(
-    conn: Any, sql: str, functions: list[Callable[..., Any]] | None = None
+    conn: Any,
+    sql: str,
+    functions: list[Callable[..., Any]] | None = None,
+    null_on_error: bool = True,
 ) -> pd.DataFrame:
-    tables = extract_tables(sql)
+    """
+    Executes an SQL query and returns the results in a DataFrame.
+    The query can contain the `AI` function or user-defined functions (specified in the `functions` argument).
 
+    :param conn: A database connection object (this is passed to pd.read_sql).
+    :param sql: SQL query to be executed. Note that the query must conform to the SQL syntax of duckdb, not your DB.
+    :param functions: List of user-defined functions. Functions must be type-annotated.
+    :param null_on_error: Determines how query execution behaves when an error occurs inside a user-defined function;
+                          if True (default), null is set to the result; if False, an exception is propagated.
+    :return: Result of query.
+    """
     functions = functions or []
     functions.append(ai)
 
-    duckdb_conn = duckdb.connect()
-    for function in functions:
-        try:
-            duckdb_conn.create_function(function.__name__, function)
-        except Exception:
-            pass
+    with tempfile.TemporaryDirectory() as dir:
+        duckdb_conn = duckdb.connect(os.path.join(dir, "duckdb.db"))
+        for function in functions:
+            try:
+                duckdb_conn.create_function(
+                    function.__name__,
+                    function,
+                    null_handling="special",  # type: ignore
+                    exception_handling="return_null" if null_on_error else "default",  # type: ignore
+                )
+            except Exception:
+                pass
+        tables = duckdb_conn.get_table_names(sql)
 
-    with temp_schema(duckdb_conn) as temp:
         for table in tables:
             df = pd.read_sql(f"SELECT * FROM {table}", conn)
             duckdb_conn.register("tmp_df", df)
-            duckdb_conn.sql(f"CREATE TABLE {temp}.{table} AS SELECT * FROM tmp_df")
-            sql = sql.replace(table, f"{temp}.{table}")
+            duckdb_conn.sql(f"CREATE TABLE {table} AS SELECT * FROM tmp_df")
 
         result = duckdb_conn.sql(sql)
         return result.df()
 
 
 def query_df(
-    df: pd.DataFrame, sql: str, functions: list[Callable[..., Any]] | None = None
+    df: pd.DataFrame,
+    sql: str,
+    functions: list[Callable[..., Any]] | None = None,
+    null_on_error: bool = True,
 ) -> pd.DataFrame:
+    """
+    Executes an SQL query over the dataframe and returns the results in a DataFrame.
+    The query can contain the `AI` function or user-defined functions (specified in the `functions` argument).
+
+    :param df: A dataframe. In the query, you can refer to it as "df".
+    :param sql: SQL query to be executed. Note that the query must conform to the SQL syntax of duckdb, not your DB.
+    :param functions: List of user-defined functions. Functions must be type-annotated.
+    :param null_on_error: Determines how query execution behaves when an error occurs inside a user-defined function;
+                          if True (default), null is set to the result; if False, an exception is propagated.
+    :return: Result of query.
+    """
     conn = duckdb.connect()
     conn.register("df", df)
-    return query(conn, sql, functions)
+    return query(conn, sql, functions, null_on_error)
